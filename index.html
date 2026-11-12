@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maximo Media Works</title>
+<meta name="description" content="Maximo Media Works. Built by hand.">
+<style>
+  :root{--washi:#F6EFE3;--hinoki:#C17B36}
+  html,body{margin:0;height:100%;background:#050b13;overflow:hidden}
+  canvas{display:block;width:100vw;height:100vh}
+  #info{position:fixed;left:0;right:0;bottom:7vh;text-align:center;color:var(--washi);
+        font:400 clamp(15px,2.1vw,22px)/1.5 Georgia,"Times New Roman",serif;letter-spacing:.04em;
+        opacity:0;transition:opacity 1.2s ease;pointer-events:none;padding:0 16px;text-shadow:0 1px 8px rgba(0,0,0,.6)}
+  #info.on{opacity:1;pointer-events:auto}
+  #info a{color:#E3AE72;text-decoration:none;border-bottom:1px solid rgba(227,174,114,.4)}
+  #info .line{font-style:italic;margin-bottom:.35em}
+  #again{position:fixed;right:18px;bottom:14px;background:none;border:0;color:rgba(246,239,227,.35);
+         font:13px system-ui,sans-serif;cursor:pointer;opacity:0;transition:opacity .8s}
+  #again.on{opacity:1}
+  #again:hover{color:rgba(246,239,227,.75)}
+  #hint{position:fixed;left:0;right:0;top:12vh;text-align:center;color:rgba(246,239,227,.32);
+        font:13px system-ui,sans-serif;letter-spacing:.2em;text-transform:uppercase;transition:opacity .6s}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hint">Maximo Media Works</div>
+<div id="info">
+  <div class="line">Built by hand. Opening soon.</div>
+  <a href="mailto:maximo@maximomediaworks.com">maximo@maximomediaworks.com</a>
+</div>
+<button id="again" type="button">Play again</button>
+<script>
+const GEO = {"wm": [[310.2, 290.7, 212.9, 802.6, 6.0, 22.8], [173.5, 321.5, 471.5, 734.9, 6.0, 19.8], [642.9, 312.0, 379.2, 751.9, 6.0, 27.0], [598.5, 299.1, 606.5, 803.4, 6.0, 23.2], [885.5, 327.2, 712.4, 801.6, 6.0, 18.8], [854.4, 331.3, 997.1, 791.1, 6.0, 20.3], [1161.4, 567.3, 660.6, 600.5, 6.0, 23.1], [1166.9, 322.2, 1368.2, 783.0, 6.0, 21.3], [1468.9, 382.1, 1107.7, 734.1, 6.0, 22.6], [1566.2, 299.2, 1535.5, 801.4, 6.0, 27.5], [1678.1, 299.0, 1669.5, 806.7, 6.0, 20.5], [1640.2, 314.8, 1886.1, 743.4, 6.0, 19.3], [2103.2, 339.5, 1794.8, 769.5, 6.0, 23.1], [1971.6, 304.4, 2036.4, 788.9, 6.0, 22.4]], "o": {"ctrl": [[2226.0, 318.0], [2390.6, 413.3], [2465.0, 566.2], [2438.1, 731.8], [2326.1, 801.4], [2206.3, 730.9], [2153.1, 580.2], [2181.6, 443.1], [2279.1, 322.6], [2401.8, 257.8]], "base_radius": 23.7, "tip_radius": 6.0}, "seal": [[413.0, 280.6, 322.5, 885.4, 11.2, 28.5], [305.0, 329.6, 698.3, 870.1, 11.2, 25.6], [896.1, 311.5, 501.6, 870.4, 11.3, 25.5], [844.6, 280.6, 877.5, 885.8, 11.6, 28.1]], "ring": {"cx": 600.0, "cy": 599.0, "r": 538.8, "w": 25.6, "wobble": 1.0, "harmonics": [[1, 0.7, -51], [4, 0.2, 4], [5, 3.2, 69]]}};
+const cv = document.getElementById('c'), mainCtx = cv.getContext('2d');
+const rc = document.createElement('canvas'), rctx = rc.getContext('2d'); // reflection layer
+let ctx = mainCtx;
+const info = document.getElementById('info'), again = document.getElementById('again'), hint = document.getElementById('hint');
+let W, H, DPR, L;
+let sticks = [], ringPts = [], sparks = [], ripples = [];
+let T0 = null, energy = 0, nextAmbient = 0, ringRippled = false;
+const params = new URLSearchParams(location.search);
+const AUTO = params.has('auto') ? parseFloat(params.get('auto')) : 4;
+
+let seed = 7;
+function rnd(){ seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; }
+const clamp = (v,a=0,b=1)=>Math.max(a,Math.min(b,v));
+const ease = t=>t<.5?4*t*t*t:1-Math.pow(-2*t+2,3)/2;
+const outBack = t=>{const c1=1.35,c3=c1+1;return 1+c3*Math.pow(t-1,3)+c1*Math.pow(t-1,2);};
+const lerp=(a,b,t)=>a+(b-a)*t;
+function angLerp(a,b,t){let d=b-a;while(d>Math.PI)d-=2*Math.PI;while(d<-Math.PI)d+=2*Math.PI;return a+d*t;}
+
+function catmull(ctrl, per=24){
+  const P=[ctrl[0],...ctrl,ctrl[ctrl.length-1]], out=[];
+  for(let i=1;i<P.length-2;i++){const[p0,p1,p2,p3]=[P[i-1],P[i],P[i+1],P[i+2]];
+    for(let j=0;j<per;j++){const t=j/per,t2=t*t,t3=t2*t;
+      out.push([0,1].map(c=>.5*((2*p1[c])+(-p0[c]+p2[c])*t+(2*p0[c]-5*p1[c]+4*p2[c]-p3[c])*t2+(-p0[c]+3*p1[c]-3*p2[c]+p3[c])*t3)));}}
+  out.push(P[P.length-2]); return out;
+}
+function resample(pts,n){
+  const s=[0];for(let i=1;i<pts.length;i++)s.push(s[i-1]+Math.hypot(pts[i][0]-pts[i-1][0],pts[i][1]-pts[i-1][1]));
+  const tot=s[s.length-1],out=[];let k=0;
+  for(let i=0;i<n;i++){const d=tot*i/(n-1);while(k<s.length-2&&s[k+1]<d)k++;
+    const f=(d-s[k])/((s[k+1]-s[k])||1);out.push([lerp(pts[k][0],pts[k+1][0],f),lerp(pts[k][1],pts[k+1][1],f)]);}
+  return {pts:out,len:tot};
+}
+const O_RAW = resample(catmull(GEO.o.ctrl), 48);
+
+function layout(){
+  DPR = Math.min(window.devicePixelRatio||1, 2);
+  W = innerWidth; H = innerHeight;
+  cv.width = rc.width = W*DPR; cv.height = rc.height = H*DPR;
+  mainCtx.setTransform(DPR,0,0,DPR,0,0); rctx.setTransform(DPR,0,0,DPR,0,0);
+  const WX0=166, WY0=254, WW=2320, WH=599;
+  const R = GEO.ring, SD = 2*(R.r + R.w/2 + 3.5), MATCH = 1.4563, GAP = 0.3, total = MATCH+GAP+1;
+  const h = Math.min(W*0.78/(WW/WH), H*0.52/total);
+  const floorY = H*0.66, top = floorY - h*total - H*0.015;
+  const ws = h/WH, wx = W/2 - WW*ws/2, wy = top + h*(MATCH+GAP);
+  const d = MATCH*h, ss = d/SD;
+  L = {h, floorY, ws, wx, wy, WX0, WY0, WW, ss, scx:W/2, scy:top+d/2, base: wy + h};
+}
+const wmPt = (x,y)=>[L.wx+(x-L.WX0)*L.ws, L.wy+(y-L.WY0)*L.ws];
+const sealPt = (x,y)=>[L.scx+(x-GEO.ring.cx)*L.ss, L.scy+(y-GEO.ring.cy)*L.ss];
+
+function build(){
+  seed = 7; sticks = []; ripples = []; sparks = []; ringRippled = false;
+  const pileW = Math.min(W*0.7, L.h*3.6), pileY = L.floorY + (H-L.floorY)*0.36, pileH = (H-L.floorY)*0.42;
+  function pilePose(len){
+    const cx = W/2 + (rnd()-.5)*pileW, cy = pileY + (rnd()-.5)*pileH;
+    const phi = rnd()*Math.PI*2, squash = 0.32;
+    const dx = Math.cos(phi)*len/2, dy = Math.sin(phi)*len/2*squash;
+    return {cx, cy, ang: Math.atan2(2*dy, 2*dx), len: 2*Math.hypot(dx,dy)};
+  }
+  function addStraight(tip, base, rt, rb, group, idx){
+    const len = Math.hypot(base[0]-tip[0], base[1]-tip[1]);
+    const tgt = {cx:(tip[0]+base[0])/2, cy:(tip[1]+base[1])/2, ang:Math.atan2(base[1]-tip[1], base[0]-tip[0]), len};
+    sticks.push({kind:'s', group, idx, rt, rb, pile:pilePose(len*0.92), tgt, ph:rnd()*10});
+  }
+  GEO.wm.forEach((s,i)=>addStraight(wmPt(s[0],s[1]), wmPt(s[2],s[3]), s[4]*L.ws, s[5]*L.ws, 'word', i));
+  const oT = O_RAW.pts.map(p=>wmPt(p[0],p[1]));
+  sticks.push({kind:'o', group:'word', idx:14, pile:pilePose(O_RAW.len*L.ws*0.62), tgtPts:oT, rb:GEO.o.base_radius*L.ws, rt:GEO.o.tip_radius*L.ws, ph:rnd()*10});
+  GEO.seal.forEach((s,i)=>addStraight(sealPt(s[0],s[1]), sealPt(s[2],s[3]), s[4]*L.ss, s[5]*L.ss, 'seal', i));
+  sticks.forEach(s=>{s.state=0;});
+  const R = GEO.ring; ringPts = [];
+  for(let i=0;i<=240;i++){const t=-Math.PI/2+2*Math.PI*i/240; let r=R.r; R.harmonics.forEach(([k,a,ph])=>r+=R.wobble*a*Math.cos(k*t-ph*Math.PI/180));
+    ringPts.push(sealPt(R.cx+r*Math.cos(t), R.cy+r*Math.sin(t)));}
+}
+
+const TL = {wordStart:0.75, wordGap:0.075, wordDur:1.05, sealShake:3.05, sealStart:3.65, sealGap:0.07, sealDur:0.7,
+            ringStart:4.45, ringDur:1.35, shimmer:5.85, shimmerDur:4.2, text:6.1};
+function startOf(s){ return s.group==='word' ? TL.wordStart + s.idx*TL.wordGap : TL.sealStart + s.idx*TL.sealGap; }
+function stickProgress(s, t){ if(t===null) return 0; return clamp((t-startOf(s))/(s.group==='word'?TL.wordDur:TL.sealDur)); }
+function shakeAmt(s, t){
+  if(t===null) return 0;
+  if(s.group==='word') return clamp(t/0.6)*(1-clamp((t-startOf(s))/0.15));
+  const a = clamp(t/0.6)*(1-clamp((t-2.4)/0.4))*0.6;
+  const b = clamp((t-TL.sealShake)/0.4)*(1-clamp((t-startOf(s))/0.12))*1.7;
+  return Math.max(a,b);
+}
+
+// ---------- ripples on the water ----------
+function ripple(x, y, strength){ ripples.push({x, y, r:0, s:strength, age:0}); energy = Math.min(1.6, energy + strength*0.35); }
+function updateRipples(dt){
+  ripples = ripples.filter(r=>(r.age+=dt) < 4.5);
+  energy *= Math.exp(-dt*0.55);
+}
+function drawRipples(){
+  ctx.save(); ctx.lineWidth = 1.2;
+  for(const r of ripples){
+    const life = r.age/4.5, rad = L.h*(0.08 + r.age*0.85);
+    const depth = clamp((r.y - L.floorY)/(H - L.floorY)); // nearer the viewer = rounder
+    const ry = rad*(0.14 + depth*0.22), a = r.s*(1-life)*(1-life);
+    for(let k=0;k<3;k++){
+      const rr = rad*(1 - k*0.18); if(rr<=0) continue;
+      ctx.beginPath(); ctx.ellipse(r.x, r.y, rr, ry*(1-k*0.18), 0, 0, Math.PI*2);
+      ctx.strokeStyle = `rgba(190,225,255,${0.30*a*(1-k*0.3)})`; ctx.stroke();
+      ctx.beginPath(); ctx.ellipse(r.x, r.y+2, rr, ry*(1-k*0.18), 0, 0, Math.PI*2);
+      ctx.strokeStyle = `rgba(0,8,20,${0.35*a*(1-k*0.3)})`; ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+// ---------- wood, drawn as round sticks lit from the upper left ----------
+function taper(tip, base, rt, rb){
+  const a=Math.atan2(base[1]-tip[1],base[0]-tip[0]);
+  ctx.beginPath();
+  ctx.arc(tip[0],tip[1],rt,a+Math.PI/2,a+Math.PI*1.5,false);
+  ctx.arc(base[0],base[1],rb,a-Math.PI/2,a+Math.PI/2,false);
+  ctx.closePath();
+}
+function woodGrad(tip, base, rt, rb){
+  const a=Math.atan2(base[1]-tip[1],base[0]-tip[0]); let nx=-Math.sin(a), ny=Math.cos(a);
+  if(ny>0 || (ny===0 && nx>0)){ nx=-nx; ny=-ny; } // n points toward the light (up / left)
+  const mx=(tip[0]+base[0])/2, my=(tip[1]+base[1])/2, R=(rt+rb)/2*1.05;
+  const g = ctx.createLinearGradient(mx+nx*R, my+ny*R, mx-nx*R, my-ny*R);
+  g.addColorStop(0,'#5a2e12'); g.addColorStop(.13,'#D9A161'); g.addColorStop(.26,'#FFEACB');
+  g.addColorStop(.4,'#E0A060'); g.addColorStop(.7,'#9a5524'); g.addColorStop(1,'#2a1206');
+  return {g, nx, ny};
+}
+let SHIM = null;
+function shimmerFill(){
+  const w = L.h*0.9, g = ctx.createLinearGradient(SHIM.x-w, SHIM.x*0.25-w*.3, SHIM.x+w, SHIM.x*0.25+w*.3);
+  g.addColorStop(0,'rgba(255,245,225,0)'); g.addColorStop(.5,`rgba(255,245,225,${.6*SHIM.a})`); g.addColorStop(1,'rgba(255,245,225,0)');
+  return g;
+}
+function woodStick(tip, base, rt, rb, lifted, useShim){
+  // shadow on the wall behind / the water below
+  ctx.save();
+  ctx.shadowColor = 'rgba(0,0,0,.55)'; ctx.shadowBlur = rb*(1+lifted*1.5); ctx.shadowOffsetX = rb*0.35*lifted; ctx.shadowOffsetY = rb*(0.4+lifted*0.9);
+  taper(tip,base,rt,rb); ctx.fillStyle='#A3602C'; ctx.fill(); ctx.restore();
+  // round body
+  const {g,nx,ny} = woodGrad(tip,base,rt,rb);
+  taper(tip,base,rt,rb); ctx.fillStyle=g; ctx.fill();
+  ctx.save(); ctx.clip();
+  // grain: two faint lines along the stick
+  ctx.lineWidth = Math.max(.6, rb*0.06); ctx.strokeStyle='rgba(90,45,15,.28)';
+  for(const o of [-.45,.2]){ ctx.beginPath(); ctx.moveTo(tip[0]+nx*rt*o, tip[1]+ny*rt*o); ctx.lineTo(base[0]+nx*rb*o, base[1]+ny*rb*o); ctx.stroke(); }
+  // darker toward the thin tip, a little light at the cut end
+  const lg = ctx.createLinearGradient(tip[0],tip[1],base[0],base[1]);
+  lg.addColorStop(0,'rgba(60,28,10,.28)'); lg.addColorStop(.35,'rgba(60,28,10,0)'); lg.addColorStop(1,'rgba(255,230,190,.08)');
+  ctx.fillStyle=lg; ctx.fillRect(Math.min(tip[0],base[0])-rb*2, Math.min(tip[1],base[1])-rb*2, Math.abs(base[0]-tip[0])+rb*4, Math.abs(base[1]-tip[1])+rb*4);
+  if(useShim){ ctx.fillStyle=shimmerFill(); ctx.fillRect(Math.min(tip[0],base[0])-rb*2, Math.min(tip[1],base[1])-rb*2, Math.abs(base[0]-tip[0])+rb*4, Math.abs(base[1]-tip[1])+rb*4); }
+  ctx.restore();
+  // the cut end: a small end face
+  const a=Math.atan2(base[1]-tip[1],base[0]-tip[0]);
+  ctx.beginPath(); ctx.ellipse(base[0],base[1],rb*0.32,rb*0.92,a,0,Math.PI*2);
+  ctx.fillStyle='rgba(120,66,30,.55)'; ctx.fill();
+}
+
+function poseOf(s, t, now){
+  const p = stickProgress(s,t), e = outBack(p), sh = shakeAmt(s,t);
+  const jx = sh*L.h*0.012*Math.sin(now*61+s.ph), jy = sh*L.h*0.010*Math.sin(now*53+s.ph*2), ja = sh*0.05*Math.sin(now*47+s.ph*3);
+  const bob = (1-clamp(p*3))*L.h*0.006*Math.sin(now*1.7+s.ph); // floating on the water
+  const A = s.pile, B = s.tgt;
+  const lift = Math.sin(Math.PI*p)*L.h*(s.group==='seal'?0.15:0.35);
+  const spin = (1-ease(p))*(s.idx%2?1:-1)*0.9*Math.sin(Math.PI*p);
+  return {cx: lerp(A.cx,B.cx,e)+jx, cy: lerp(A.cy,B.cy,e)-lift+jy+bob, ang: angLerp(A.ang,B.ang,clamp(e,0,1.2))+ja+spin, len: lerp(A.len,B.len,clamp(e)), p};
+}
+function endsOf(q){const dx=Math.cos(q.ang)*q.len/2, dy=Math.sin(q.ang)*q.len/2;return [[q.cx-dx,q.cy-dy],[q.cx+dx,q.cy+dy]];}
+function oPoints(s, t, now){
+  const p = stickProgress(s,t), e = outBack(p), sh = shakeAmt(s,t);
+  const A = s.pile, n = s.tgtPts.length, dx=Math.cos(A.ang), dy=Math.sin(A.ang);
+  const lift = Math.sin(Math.PI*p)*L.h*0.35;
+  const jx = sh*L.h*0.012*Math.sin(now*61+s.ph), jy = sh*L.h*0.010*Math.sin(now*53+s.ph*2) + (1-clamp(p*3))*L.h*0.006*Math.sin(now*1.7+s.ph);
+  return s.tgtPts.map((q,i)=>{
+    const f = clamp(e*1.15 - (i/n)*0.15, 0, 1.15);
+    const sx = A.cx + dx*A.len*(i/(n-1)-.5), sy = A.cy + dy*A.len*(i/(n-1)-.5);
+    return [lerp(sx,q[0],f)+jx, lerp(sy,q[1],f)-lift+jy];
+  });
+}
+function drawO(pts, s, lifted, useShim){
+  const n=pts.length, rad=i=>lerp(s.rb,s.rt,i/(n-1));
+  // one shadow for the whole bent stick
+  ctx.save(); ctx.shadowColor='rgba(0,0,0,.55)'; ctx.shadowBlur=s.rb*(1+lifted*1.5); ctx.shadowOffsetX=s.rb*.35*lifted; ctx.shadowOffsetY=s.rb*(.4+lifted*.9);
+  ctx.beginPath();
+  for(let i=0;i<n-1;i++){ const a=Math.atan2(pts[i][1]-pts[i+1][1],pts[i][0]-pts[i+1][0]);
+    ctx.moveTo(pts[i+1][0]+rad(i+1)*Math.cos(a+Math.PI/2), pts[i+1][1]+rad(i+1)*Math.sin(a+Math.PI/2));
+    ctx.arc(pts[i+1][0],pts[i+1][1],rad(i+1),a+Math.PI/2,a+Math.PI*1.5,false); ctx.arc(pts[i][0],pts[i][1],rad(i),a-Math.PI/2,a+Math.PI/2,false); ctx.closePath(); }
+  ctx.fillStyle='#A3602C'; ctx.fill(); ctx.restore();
+  // round body in layers (one colour per layer, so no seams between segments)
+  const layer=(col,k,ox,oy)=>{ ctx.strokeStyle=col; ctx.lineCap='round';
+    for(let i=0;i<n-1;i++){ ctx.lineWidth=2*rad(i)*k; ctx.beginPath(); ctx.moveTo(pts[i][0]+ox*rad(i),pts[i][1]+oy*rad(i)); ctx.lineTo(pts[i+1][0]+ox*rad(i),pts[i+1][1]+oy*rad(i)); ctx.stroke(); } };
+  layer('#5a2e12',1,0,0); layer('#9a5524',.86,.04,.1); layer('#E0A060',.6,-.12,-.18); layer('#FFEACB',.22,-.22,-.36);
+  if(useShim) layer(shimmerFill(),1,0,0);
+  ctx.beginPath(); const a=Math.atan2(pts[0][1]-pts[1][1],pts[0][0]-pts[1][0]);
+  ctx.ellipse(pts[0][0],pts[0][1],s.rb*.32,s.rb*.92,a,0,Math.PI*2); ctx.fillStyle='rgba(120,66,30,.55)'; ctx.fill();
+}
+function drawRing(frac, useShim){
+  if(frac<=0) return;
+  const n = Math.max(2, Math.round(frac*(ringPts.length-1))+1), w = GEO.ring.w*L.ss, pts = ringPts.slice(0,n);
+  const path = ()=>{ctx.beginPath(); pts.forEach((p,i)=>i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1]));};
+  ctx.lineCap='round'; ctx.lineJoin='round';
+  ctx.save(); ctx.shadowColor='rgba(0,0,0,.55)'; ctx.shadowBlur=w*2; ctx.shadowOffsetX=w*.35; ctx.shadowOffsetY=w*1.1;
+  path(); ctx.strokeStyle='#7a4220'; ctx.lineWidth=w; ctx.stroke(); ctx.restore();
+  path(); ctx.strokeStyle='#B87132'; ctx.lineWidth=w*.8; ctx.stroke();
+  ctx.save(); ctx.translate(-w*.12,-w*.18); path(); ctx.strokeStyle='#E9B97C'; ctx.lineWidth=w*.42; ctx.stroke();
+  path(); ctx.strokeStyle='rgba(255,236,205,.8)'; ctx.lineWidth=w*.14; ctx.stroke(); ctx.restore();
+  if(useShim){ path(); ctx.strokeStyle=shimmerFill(); ctx.lineWidth=w; ctx.stroke(); }
+}
+
+function drawBack(now){
+  const fy = L.floorY;
+  let g = ctx.createLinearGradient(0,0,0,fy);
+  g.addColorStop(0,'#03070d'); g.addColorStop(.7,'#0d1d30'); g.addColorStop(1,'#1d3a57');
+  ctx.fillStyle=g; ctx.fillRect(0,0,W,fy);
+  g = ctx.createLinearGradient(0,fy,0,H);
+  g.addColorStop(0,'#1a3550'); g.addColorStop(.35,'#0f2134'); g.addColorStop(1,'#040a12');
+  ctx.fillStyle=g; ctx.fillRect(0,fy,W,H-fy);
+  g = ctx.createRadialGradient(W/2,fy,0,W/2,fy,Math.max(W,H)*.6);
+  g.addColorStop(0,'rgba(120,175,230,.22)'); g.addColorStop(1,'rgba(120,175,230,0)');
+  ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+}
+function drawWaterGlints(now){
+  const fy=L.floorY, amp = 1 + energy*2.2;
+  ctx.save(); ctx.lineWidth=1;
+  for(let k=1;k<=22;k++){
+    const d = Math.pow(k/22,1.7), y = fy + (H-fy)*d, A = (1.2+d*6)*amp*0.5, f = 0.012/(0.3+d), sp = 0.7+k*0.05;
+    ctx.beginPath();
+    for(let x=0;x<=W;x+=8){ const yy = y + A*Math.sin(x*f + now*sp + k) + A*.5*Math.sin(x*f*2.3 - now*sp*1.3); x?ctx.lineTo(x,yy):ctx.moveTo(x,yy); }
+    ctx.strokeStyle=`rgba(170,210,245,${0.035+0.03*(1-d)})`; ctx.stroke();
+  }
+  ctx.strokeStyle='rgba(190,225,255,.18)'; ctx.beginPath(); ctx.moveTo(0,fy); ctx.lineTo(W,fy); ctx.stroke();
+  ctx.restore();
+}
+
+function drawScene(t, now, mirror){
+  const useShim = !mirror && SHIM && SHIM.a>0.01;
+  for(const s of sticks){
+    const p = stickProgress(s,t);
+    if(mirror && p<=0) continue;
+    const lifted = clamp(p*1.4);
+    ctx.save();
+    if(mirror){ ctx.translate(0,2*L.base); ctx.scale(1,-1); }
+    if(s.kind==='o') drawO(oPoints(s,t,now), s, lifted, useShim);
+    else { const [tip,base] = endsOf(poseOf(s,t,now)); woodStick(tip, base, s.rt, s.rb, lifted, useShim); }
+    ctx.restore();
+  }
+  if(t!==null){
+    const rf = clamp((t-TL.ringStart)/TL.ringDur), e = ease(rf);
+    ctx.save(); if(mirror){ ctx.translate(0,2*L.base); ctx.scale(1,-1); }
+    drawRing(e, useShim); ctx.restore();
+    if(!mirror && rf>0 && rf<1){
+      const i = Math.round(e*(ringPts.length-1)), hp = ringPts[i];
+      const g = ctx.createRadialGradient(hp[0],hp[1],0,hp[0],hp[1],L.h*.35);
+      g.addColorStop(0,'rgba(255,236,200,.9)'); g.addColorStop(.25,'rgba(233,185,124,.35)'); g.addColorStop(1,'rgba(193,123,54,0)');
+      ctx.fillStyle=g; ctx.beginPath(); ctx.arc(hp[0],hp[1],L.h*.35,0,7); ctx.fill();
+      for(let k=0;k<3;k++) sparks.push({x:hp[0],y:hp[1],vx:(Math.random()-.5)*L.h*1.2,vy:(Math.random()-.5)*L.h*1.2,life:1});
+    }
+  }
+}
+function drawSparks(dt){
+  ctx.save(); ctx.globalCompositeOperation='lighter';
+  sparks = sparks.filter(p=>(p.life-=dt*1.6)>0);
+  for(const p of sparks){ p.x+=p.vx*dt; p.y+=p.vy*dt; p.vx*=.96; p.vy*=.96;
+    ctx.fillStyle=`rgba(255,225,180,${p.life*.8})`; ctx.beginPath(); ctx.arc(p.x,p.y,1+2*p.life,0,7); ctx.fill(); }
+  ctx.restore();
+}
+
+// events that stir the water
+function stir(t, dt, now){
+  if(now > nextAmbient){ // the water is never quite still
+    ripple(W*(0.1+Math.random()*0.8), L.floorY + (H-L.floorY)*(0.1+Math.random()*0.8), t===null?0.25:0.4);
+    nextAmbient = now + (t===null ? 1.4 : 0.6) + Math.random()*0.8;
+  }
+  if(t===null) return;
+  for(const s of sticks){
+    const p = stickProgress(s,t), sh = shakeAmt(s,t);
+    if(p===0 && sh>0.15 && Math.random() < dt*5*sh) ripple(s.pile.cx + (Math.random()-.5)*s.pile.len*.6, s.pile.cy, 0.35+sh*0.3);
+    if(s.state===0 && p>0){ s.state=1; ripple(s.pile.cx, s.pile.cy, 1.0); }            // leaves the water
+    if(s.state===1 && p>=1){ s.state=2;                                                   // lands in place
+      const x = s.kind==='o' ? s.tgtPts[0][0] : s.tgt.cx; ripple(x, L.floorY + (H-L.floorY)*0.05, s.group==='seal'?0.5:0.45); }
+  }
+  if(!ringRippled && t > TL.ringStart+TL.ringDur){ ringRippled=true; ripple(W/2, L.floorY + (H-L.floorY)*0.06, 1.3); }
+}
+
+let last = performance.now()/1000;
+function frame(){
+  const now = performance.now()/1000, dt = Math.min(.05, now-last); last = now;
+  const t = T0===null ? null : now-T0;
+  if(t!==null && t>TL.shimmer){
+    const st = t-TL.shimmer, passes=3, per=TL.shimmerDur/passes, k=Math.floor(st/per), f=(st%per)/per;
+    SHIM = k<passes ? {x: lerp(L.wx-L.h*1.5, L.wx+L.WW*L.ws+L.h*1.5, f), a:(1-k/passes)*Math.sin(Math.PI*f)} : null;
+  } else SHIM = null;
+  stir(t, dt, now); updateRipples(dt);
+
+  ctx = mainCtx; drawBack(now);
+  // reflection: draw the mirrored scene on its own layer, then lay it on the water in wavy strips
+  ctx = rctx; ctx.clearRect(0,0,W,H); drawScene(t, now, true); ctx = mainCtx;
+  const fy = L.floorY, amp = 0.7 + energy*1.8;
+  ctx.save(); ctx.globalAlpha = 0.42;
+  for(let y=Math.floor(fy); y<H; y+=2){
+    const d = (y-fy)/(H-fy), dx = amp*(0.4+d*2.0)*Math.sin(y*0.07 - now*2.0) + amp*0.6*d*Math.sin(y*0.023 + now*1.1);
+    ctx.drawImage(rc, 0, y*DPR, W*DPR, 2*DPR, dx, y, W, 2);
+  }
+  ctx.restore();
+  const g = ctx.createLinearGradient(0,fy,0,H);
+  g.addColorStop(0,'rgba(10,25,42,0)'); g.addColorStop(1,'rgba(3,8,14,.9)');
+  ctx.fillStyle=g; ctx.fillRect(0,fy,W,H-fy);
+  drawWaterGlints(now);
+  drawRipples();
+  drawScene(t, now, false);
+  drawSparks(dt);
+  if(t!==null && t>TL.text) info.classList.add('on');
+  if(t!==null && t>TL.shimmer+TL.shimmerDur) again.classList.add('on');
+  requestAnimationFrame(frame);
+}
+
+function start(){ if(T0!==null) return; T0 = performance.now()/1000; hint.style.opacity=0; }
+let lastY=null, down=0;
+addEventListener('mousemove', e=>{ if(lastY!==null && e.clientY>lastY) down+=e.clientY-lastY; lastY=e.clientY; if(down>60) start(); });
+addEventListener('wheel', start, {passive:true});
+addEventListener('touchstart', start, {passive:true});
+addEventListener('keydown', start);
+if(AUTO>0) setTimeout(start, AUTO*1000);
+again.addEventListener('click', e=>{ e.stopPropagation(); T0=null; build(); info.classList.remove('on'); again.classList.remove('on'); hint.style.opacity=1; down=0; setTimeout(start,700); });
+if(matchMedia('(prefers-reduced-motion: reduce)').matches){ T0 = performance.now()/1000 - 30; }
+addEventListener('resize', ()=>{ layout(); build(); });
+layout(); build(); requestAnimationFrame(frame);
+</script>
+</body>
+</html>
