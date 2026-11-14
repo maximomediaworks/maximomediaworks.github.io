@@ -10,8 +10,8 @@
 <meta property="og:image" content="https://maximomediaworks.com/last.jpg">
 <style>
   html,body{margin:0;height:100%;background:#050b13;overflow:hidden}
-  video,.still{position:fixed;inset:0;width:100vw;height:100vh;object-fit:cover;background:#050b13}
-  @media (max-aspect-ratio:4/3){video,.still{object-fit:contain}}
+  video,.still{position:fixed;left:0;right:0;bottom:0;top:4vh;width:100vw;height:96vh;object-fit:cover;object-position:50% 0%;background:#050b13}
+  @media (max-aspect-ratio:4/3){video,.still{top:0;height:100vh;object-fit:contain;object-position:50% 50%}}
   .still{display:none}
   #info{position:fixed;left:0;right:0;bottom:7vh;text-align:center;color:#F6EFE3;
         font:400 clamp(15px,2.1vw,22px)/1.5 Georgia,"Times New Roman",serif;letter-spacing:.04em;
